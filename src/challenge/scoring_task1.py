@@ -84,7 +84,7 @@ def generate_scores(testingDir: str = "."):
     # The challenge will also evaluate the breast density variable, but it is not included in all the training data
 
     # Define paths (modify as needed)
-    data_dir = r'E:\MAMA-MIA'  # Path to the data directory
+    data_dir = '/mnt/storageSSD/MAMA-MIA/data'  # Path to the data directory
     clinical_data_xlsx = f'{data_dir}/clinical_and_imaging_info.xlsx' # Path to the clinical data
     gt_segmentations = f'{data_dir}/segmentations/expert' # Path to the ground truth expert segmentations
     json_info_files = f'{data_dir}/patient_info_files' # Path to the patient JSON info files
