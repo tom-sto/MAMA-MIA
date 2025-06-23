@@ -76,7 +76,7 @@ def plot_combined_segmentation_heatmaps(fairness_varibles_df, variable_1, variab
 # Main Execution
 # ----------------------------
 
-def generate_scores(testingDir: str = "."):
+def generate_scores(testingDir: str = ".", forCorrupted: bool = False):
     # Settings
     HD_MAX = 150
     alpha = 0.5  # Weight for balancing performance and fairness
@@ -117,7 +117,11 @@ def generate_scores(testingDir: str = "."):
     for idx, patient_id in enumerate(pred_patient_list):
         print(f'Processing patient {idx + 1}/{len(pred_patient_list)}: {patient_id}')
         # Read the segmentation files
-        gt_file = os.path.join(gt_segmentations, f'{patient_id}.nii.gz')
+        if forCorrupted:
+            gt_file = os.path.join(gt_segmentations, f'{patient_id[:-2]}.nii.gz')
+            augmentation = patient_id[-2:]
+        else:
+            gt_file = os.path.join(gt_segmentations, f'{patient_id}.nii.gz')
         # Read it with SimpleITk and convert to numpy
         itk_image = sitk.ReadImage(gt_file)
         gt_mask = sitk.GetArrayFromImage(itk_image)
@@ -130,8 +134,12 @@ def generate_scores(testingDir: str = "."):
         
         metrics = compute_segmentation_metrics(gt_mask, pred_mask, hd_max=HD_MAX)
         patient_id = str(patient_id).upper()
-        fairness_varibles_df.loc[fairness_varibles_df['patient_id']==patient_id, 'DSC'] = metrics['DSC']
-        fairness_varibles_df.loc[fairness_varibles_df['patient_id']==patient_id, 'NormHD'] = metrics['NormHD']
+        if forCorrupted:
+            fairness_varibles_df.loc[fairness_varibles_df['patient_id']==patient_id[:-2], f'DSC{augmentation}'] = metrics['DSC']
+            fairness_varibles_df.loc[fairness_varibles_df['patient_id']==patient_id[:-2], f'NormHD{augmentation}'] = metrics['NormHD']
+        else:
+            fairness_varibles_df.loc[fairness_varibles_df['patient_id']==patient_id, 'DSC'] = metrics['DSC']
+            fairness_varibles_df.loc[fairness_varibles_df['patient_id']==patient_id, 'NormHD'] = metrics['NormHD']
         dice_scores.append(metrics['DSC'])
         hausdorff_distances.append(metrics['NormHD'])
 
@@ -143,6 +151,10 @@ def generate_scores(testingDir: str = "."):
     # Compute performance score (combining Dice and NormHD)
     performance_score = 0.5 * (np.mean(dice_scores) + (1 - np.mean(hausdorff_distances)))
     print(f'Performance score: {performance_score:.4f}')
+
+    if forCorrupted:
+        print("Not doing plots for corrupted dataset. Finishing up...")
+        return
     
     upper_pred_patient_ids = [x.upper() for x in pred_patient_list]
     fairness_varibles_df = fairness_varibles_df[fairness_varibles_df['patient_id'].isin(upper_pred_patient_ids)]
