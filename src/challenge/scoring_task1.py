@@ -76,7 +76,7 @@ def plot_combined_segmentation_heatmaps(fairness_varibles_df, variable_1, variab
 # Main Execution
 # ----------------------------
 
-def generate_scores(data_dir: str, testingDir: str = ".", forCorrupted: bool = False):
+def generate_scores(data_dir: str, testingDir: str, forCorrupted: bool = False):
     # Settings
     HD_MAX = 150
     alpha = 0.5  # Weight for balancing performance and fairness
