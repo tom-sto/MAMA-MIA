@@ -119,17 +119,17 @@ def print_subgroup_metrics(df, fairness_variables):
 # ----------------------------
 # Main Execution
 # ----------------------------
-
-if __name__ == '__main__':
+def doScoring(data_dir):
+    import warnings
+    warnings.filterwarnings('ignore')
 
     # Settings
     alpha = 0.5  # Weight for balancing performance and fairness
-    selected_fairness_variables = ['age', 'menopausal_status', 'breast_density']
+    selected_fairness_variables = ['age', 'menopause', 'breast_density']
     # The challenge will also evaluate the breast density variable, but it is not included in all the training data
 
     # Define paths (modify as needed)
-    data_dir = '/path/to/dataset/root/directory'  # Path to the data directory
-    clinical_data_xlsx = '/path/to/clinical_and_imaging_info.xlsx' # Path to the clinical data
+    clinical_data_xlsx = '/mnt/storageSSD/MAMA-MIA/data/clinical_and_imaging_info.xlsx' # Path to the clinical data
     output_csv = f'{data_dir}/results_task2.csv'
     output_plots_dir = f'{data_dir}/plots'
 
@@ -140,8 +140,8 @@ if __name__ == '__main__':
     # Modify age column values mapping them by age groups
     fairness_varibles_df['age'] = pd.cut(fairness_varibles_df['age'], bins=[0, 40, 50, 60, 70, 100], labels=['0-40', '41-50', '51-60', '61-70', '71+'])
     # Clean menopausal status
-    fairness_varibles_df['menopausal_status'] = (
-        fairness_varibles_df['menopausal_status']
+    fairness_varibles_df['menopause'] = (
+        fairness_varibles_df['menopause']
         .fillna('unknown')
         .str.lower()
         .apply(lambda x: 'pre' if 'peri' in x or 'pre' in x else ('post' if 'post' in x else x))
@@ -151,9 +151,94 @@ if __name__ == '__main__':
     os.makedirs(output_plots_dir, exist_ok=True)
 
     # Generate random predictions (to be replaced with model output)
-    np.random.seed(42)
-    pred_scores = np.random.rand(len(fairness_varibles_df))
-    fairness_varibles_df['pcr_pred'] = pred_scores > 0.5
+    inputDFpath = rf"{data_dir}\pcr_predictions.csv"
+    inputDF = pd.read_csv(inputDFpath)
+    fairness_varibles_df = fairness_varibles_df.merge(inputDF[['patient_id', 'pcr_pred']], on='patient_id', how='inner')
+    fairness_varibles_df['pcr_pred'] = fairness_varibles_df['pcr_pred'].astype(int)
+    fairness_varibles_df.to_csv(output_csv, index=False)
+
+    # Score performance
+    y_true = fairness_varibles_df['pcr'].fillna(0).astype(int)
+    y_pred = fairness_varibles_df['pcr_pred'].fillna(0).astype(int)
+    balanced_accuracy = balanced_accuracy_score(y_true, y_pred)
+    print(f'Average Balanced Accuracy: {balanced_accuracy:.4f}')
+    performance_score = balanced_accuracy
+
+    # Fairness analysis
+    equalized_odds_disparities = {}
+
+    for var in selected_fairness_variables:
+        groups = fairness_varibles_df.groupby(var)
+        tpr, fpr = {}, {}
+
+        for i, (_, group) in enumerate(groups):
+            yt = group['pcr'].astype(int)
+            yp = group['pcr_pred'].astype(int)
+            try:
+                tn, fp_, fn, tp = confusion_matrix(yt, yp).ravel()
+                tpr[i] = tp / (tp + fn) if (tp + fn) else 0
+                fpr[i] = fp_ / (fp_ + tn) if (fp_ + tn) else 0
+            except ValueError:
+                tpr[i], fpr[i] = 0, 0
+
+        disparity = max(tpr.values()) - min(tpr.values()) #+ max(fpr.values()) - min(fpr.values())
+        equalized_odds_disparities[var] = disparity
+
+    fairness_score = np.mean(list(equalized_odds_disparities.values()))
+    fairness_score = np.clip(fairness_score, 0, 1)
+    ranking_score = (1 - alpha) * performance_score + alpha * (1 - fairness_score)
+
+    print(f'Fairness Score: {1 - fairness_score:.4f}')
+    print(f'Ranking Score: {ranking_score:.4f}')
+    
+
+    # Print subgroup metrics
+    print_subgroup_metrics(fairness_varibles_df, selected_fairness_variables)
+
+    # # Generate plots
+    # radar_plot_path = os.path.join(output_plots_dir, 'radar_fairness_disparities.png')
+    # plot_fairness_radar(equalized_odds_disparities, radar_plot_path)
+
+    # for var in selected_fairness_variables:
+    #     plot_confusion_matrices(
+    #         fairness_varibles_df, group_var=var,
+    #         save_path=os.path.join(output_plots_dir, f'cm_by_{var}.png')
+    #     )
+
+if __name__ == '__main__':
+
+    # Settings
+    alpha = 0.5  # Weight for balancing performance and fairness
+    selected_fairness_variables = ['age', 'menopause', 'breast_density']
+    # The challenge will also evaluate the breast density variable, but it is not included in all the training data
+
+    # Define paths (modify as needed)
+    data_dir = '/mnt/storageSSD/MAMA-MIA/mama-mia-challenge/nnUNet_results/Dataset104_cropped_3ch_breast/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_4_transformer_joint_JD_last_try/outputs'  # Path to the data directory
+    clinical_data_xlsx = '/mnt/storageSSD/MAMA-MIA/data/clinical_and_imaging_info.xlsx' # Path to the clinical data
+    output_csv = f'{data_dir}/pcr_scores.csv'
+    output_plots_dir = f'{data_dir}/plots'
+
+    # Read clinical data and get the fairness groups
+    clinical_df = pd.read_excel(clinical_data_xlsx, sheet_name='dataset_info')
+    # For fairness_varibles_df, we will drop all the clinical_df columns except the selected_fairness_variables and patient_id
+    fairness_varibles_df = clinical_df[['patient_id', 'pcr'] + selected_fairness_variables]
+    # Modify age column values mapping them by age groups
+    fairness_varibles_df['age'] = pd.cut(fairness_varibles_df['age'], bins=[0, 40, 50, 60, 70, 100], labels=['0-40', '41-50', '51-60', '61-70', '71+'])
+    # Clean menopausal status
+    fairness_varibles_df['menopause'] = (
+        fairness_varibles_df['menopause']
+        .fillna('unknown')
+        .str.lower()
+        .apply(lambda x: 'pre' if 'peri' in x or 'pre' in x else ('post' if 'post' in x else x))
+    )
+
+    # Create output directories if they do not exist
+    os.makedirs(output_plots_dir, exist_ok=True)
+
+    # Generate random predictions (to be replaced with model output)
+    inputDFpath = rf"{data_dir}/pcr_scores.csv"
+    inputDF = pd.read_csv(inputDFpath)
+    fairness_varibles_df = fairness_varibles_df.merge(inputDF[['patient_id', 'pcr_pred']], on='patient_id', how='inner')
     fairness_varibles_df['pcr_pred'] = fairness_varibles_df['pcr_pred'].astype(int)
     fairness_varibles_df.to_csv(output_csv, index=False)
 
